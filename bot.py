@@ -1,12 +1,16 @@
 import logging
 import hashlib
 import requests
+import os
+import exifread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 BOT_TOKEN = "9296265397:AAEBe4iP1NmAS8DpmT4BFcLLsdaic3sVdSk"
@@ -22,14 +26,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     welcome = (
         f"👋 Hello, {user.first_name}!\n\n"
-        "🔓 Welcome to the Hash Cracker Lab Bot.\n\n"
+        "🔓 Welcome to the Hacker Lab Bot.\n\n"
         "Choose a tool from the menu below:"
     )
     keyboard = [
-        [InlineKeyboardButton("🔐 Hash Generator", callback_data="hash_gen")],
-        [InlineKeyboardButton("🔍 Hash Identifier", callback_data="hash_id")],
-        [InlineKeyboardButton("🔓 Hash Cracker", callback_data="hash_crack")],
+        [InlineKeyboardButton("🔐 Hash Tools", callback_data="hash_tools")],
         [InlineKeyboardButton("🕵️‍♂️ OSINT Lookup", callback_data="osint")],
+        [InlineKeyboardButton("🖼️ Image EXIF Spy", callback_data="exif")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -40,12 +43,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     help_text = (
         "📖 Commands:\n\n"
         "/start - Open menu\n"
-        "/help - Show this message\n"
         "/hash <text> - Generate MD5, SHA1, SHA256\n"
         "/identify <hash> - Identify hash type\n"
-        "/search <username> - Find username across platforms\n"
-        "/crack <hash> - Run dictionary attack\n\n"
-        "⚠️ Only test on your own data."
+        "/search <username> - OSINT Lookup\n\n"
+        "🖼️ To extract EXIF data, send an image as a FILE (Document)."
     )
     await update.message.reply_text(help_text)
 
@@ -68,7 +69,6 @@ async def hash_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"SHA1:\n`{sha1_hash}`\n\n"
         f"SHA256:\n`{sha256_hash}`"
     )
-
     await update.message.reply_text(response, parse_mode="Markdown")
 
 
@@ -82,7 +82,7 @@ async def identify_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     is_hex = all(c in "0123456789abcdefABCDEF" for c in hash_str)
 
     if not is_hex:
-        await update.message.reply_text("❌ This is not a valid hash. Hashes only contain hexadecimal characters.")
+        await update.message.reply_text("❌ This is not a valid hash.")
         return
 
     if length == 32:
@@ -96,12 +96,7 @@ async def identify_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         hash_type = "Unknown"
 
-    response = (
-        f"Input Hash: `{hash_str}`\n\n"
-        f"Length: {length} characters\n"
-        f"Identified Type: **{hash_type}**"
-    )
-
+    response = f"Input Hash: `{hash_str}`\n\nLength: {length} chars\nIdentified Type: **{hash_type}**"
     await update.message.reply_text(response, parse_mode="Markdown")
 
 
@@ -111,67 +106,116 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     username = context.args[0].strip()
-    msg = await update.message.reply_text(f"🕵️‍♂️ Searching for '{username}' across platforms...")
+    msg = await update.message.reply_text(f"🕵️‍♂️ Searching for '{username}'...")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
-    
+    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15"}
     results = []
     
     platforms = [
-        {"name": "GitHub", "url": f"https://github.com/{username}", "check_url": f"https://github.com/{username}"},
-        {"name": "Twitter (X)", "url": f"https://twitter.com/{username}", "check_url": f"https://twitter.com/{username}"},
-        {"name": "Telegram", "url": f"https://t.me/{username}", "check_url": f"https://t.me/{username}"},
-        {"name": "Pinterest", "url": f"https://pinterest.com/{username}", "check_url": f"https://pinterest.com/{username}"},
-        {"name": "GitLab", "url": f"https://gitlab.com/{username}", "check_url": f"https://gitlab.com/{username}"},
-        {"name": "YouTube", "url": f"https://youtube.com/@{username}", "check_url": f"https://youtube.com/@{username}"},
-        {"name": "Instagram", "url": f"https://instagram.com/{username}", "check_url": f"https://www.instagram.com/{username}/"},
-        {"name": "Facebook", "url": f"https://facebook.com/{username}", "check_url": f"https://www.facebook.com/{username}"}
+        {"name": "GitHub", "url": f"https://github.com/{username}"},
+        {"name": "Twitter (X)", "url": f"https://twitter.com/{username}"},
+        {"name": "Telegram", "url": f"https://t.me/{username}"},
+        {"name": "Pinterest", "url": f"https://pinterest.com/{username}"},
+        {"name": "GitLab", "url": f"https://gitlab.com/{username}"},
+        {"name": "YouTube", "url": f"https://youtube.com/@{username}"}
     ]
 
-    for platform in platforms:
+    for p in platforms:
         try:
-            res = requests.get(platform["check_url"], headers=headers, timeout=8, allow_redirects=False)
-            
-            if platform["name"] == "Instagram":
-                if res.status_code == 200:
-                    results.append(f"✅ {platform['name']}: {platform['url']}")
-            elif platform["name"] == "Facebook":
-                if res.status_code == 200:
-                    results.append(f"✅ {platform['name']}: {platform['url']}")
-            else:
-                if res.status_code == 200:
-                    results.append(f"✅ {platform['name']}: {platform['url']}")
-                    
+            res = requests.get(p["url"], headers=headers, timeout=5, allow_redirects=False)
+            if res.status_code == 200:
+                results.append(f"✅ {p['name']}: {p['url']}")
         except Exception:
             pass
 
     if results:
         final_text = f"🕵️‍♂️ OSINT Results for **{username}**:\n\n" + "\n".join(results)
-        final_text += "\n\n⚠️ *Note: Platforms like Instagram and Facebook might block requests due to high security.*"
     else:
         final_text = f"❌ No public profiles found for **{username}**."
     
     await msg.edit_text(final_text, parse_mode="Markdown")
 
 
+def convert_to_degrees(value):
+    d = float(value.values[0].num) / float(value.values[0].den)
+    m = float(value.values[1].num) / float(value.values[1].den)
+    s = float(value.values[2].num) / float(value.values[2].den)
+    return d + (m / 60.0) + (s / 3600.0)
+
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message.document:
+        file_id = update.message.document.file_id
+    elif update.message.photo:
+        await update.message.reply_text("⚠️ Please send the image as a **File (Document)**, not a Photo. Telegram deletes the hidden data from normal photos!")
+        return
+    else:
+        return
+
+    msg = await update.message.reply_text("🕵️‍♂️ Extracting EXIF Metadata...")
+    
+    new_file = await context.bot.get_file(file_id)
+    temp_path = "temp_image.jpg"
+    await new_file.download_to_drive(temp_path)
+
+    try:
+        with open(temp_path, 'rb') as f:
+            tags = exifread.process_file(f)
+
+        if not tags:
+            await msg.edit_text("❌ No EXIF data found in this image. (Maybe it's a screenshot or WhatsApp image).")
+            return
+
+        make = tags.get('Image Make', 'Unknown')
+        model = tags.get('Image Model', 'Unknown')
+        date_time = tags.get('Image DateTime', 'Unknown')
+        
+        response = (
+            f"🖼️ **EXIF Data Found!**\n\n"
+            f"📱 **Device:** {make} {model}\n"
+            f"📅 **Date/Time:** {date_time}\n"
+        )
+
+        lat = tags.get('GPS GPSLatitude')
+        lat_ref = tags.get('GPS GPSLatitudeRef')
+        lon = tags.get('GPS GPSLongitude')
+        lon_ref = tags.get('GPS GPSLongitudeRef')
+
+        if lat and lon:
+            lat_deg = convert_to_degrees(lat)
+            lon_deg = convert_to_degrees(lon)
+            
+            if lat_ref and lat_ref.values[0] != 'N':
+                lat_deg = -lat_deg
+            if lon_ref and lon_ref.values[0] != 'E':
+                lon_deg = -lon_deg
+
+            gmap_link = f"https://www.google.com/maps?q={lat_deg},{lon_deg}"
+            response += f"\n📍 **Location Found!**\n[Click to view on Google Maps]({gmap_link})"
+        else:
+            response += "\n📍 **Location:** GPS data not available."
+
+        await msg.edit_text(response, parse_mode="Markdown", disable_web_page_preview=True)
+
+    except Exception as e:
+        await msg.edit_text(f"❌ Error extracting data: {e}")
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
 
-    if query.data == "hash_gen":
-        await query.edit_message_text("🔐 Hash Generator\n\nUsage: /hash <text>\nExample: /hash hello")
-    elif query.data == "hash_id":
-        await query.edit_message_text("🔍 Hash Identifier\n\nUsage: /identify <hash>\nExample: /identify 5d41402abc4b2a76b9719d911017c592")
-    elif query.data == "hash_crack":
-        await query.edit_message_text("🔓 Hash Cracker\n\nUsage: /crack <hash>\nExample: /crack 5d41402abc4b2a76b9719d911017c592\n\n⚠️ Only test on your own hashes!")
+    if query.data == "hash_tools":
+        await query.edit_message_text("🔐 **Hash Tools**\n\n/hash <text> - Generate hashes\n/identify <hash> - Identify hash")
     elif query.data == "osint":
-        await query.edit_message_text("🕵️‍♂️ OSINT Lookup\n\nUsage: /search <username>\nExample: /search elonmusk")
+        await query.edit_message_text("🕵️‍♂️ **OSINT Lookup**\n\nUsage: /search <username>")
+    elif query.data == "exif":
+        await query.edit_message_text("🖼️ **Image EXIF Spy**\n\nSend me any image as a **File (Document)** to extract its hidden camera and GPS data!\n\n*(Note: Do not send as Photo).*")
     elif query.data == "help":
-        await query.edit_message_text("📖 Type /help to see all commands.\n\nOr use /start to open the menu.")
+        await query.edit_message_text("📖 Type /help to see all commands.")
 
 
 def main() -> None:
@@ -185,9 +229,11 @@ def main() -> None:
     app.add_handler(CommandHandler("hash", hash_command))
     app.add_handler(CommandHandler("identify", identify_command))
     app.add_handler(CommandHandler("search", search_command))
+    
+    app.add_handler(MessageHandler(filters.Document.IMAGE | filters.PHOTO, handle_image))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("Bot is running...")
+    logger.info("Hacker Bot is running...")
     app.run_polling()
 
 
