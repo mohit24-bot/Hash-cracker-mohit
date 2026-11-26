@@ -113,7 +113,12 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     username = context.args[0].strip()
     msg = await update.message.reply_text(f"🕵️‍♂️ Searching for '{username}' across platforms...")
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
+    
     results = []
     
     platforms = [
@@ -122,20 +127,31 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         {"name": "Telegram", "url": f"https://t.me/{username}", "check_url": f"https://t.me/{username}"},
         {"name": "Pinterest", "url": f"https://pinterest.com/{username}", "check_url": f"https://pinterest.com/{username}"},
         {"name": "GitLab", "url": f"https://gitlab.com/{username}", "check_url": f"https://gitlab.com/{username}"},
-        {"name": "YouTube", "url": f"https://youtube.com/@{username}", "check_url": f"https://youtube.com/@{username}"}
+        {"name": "YouTube", "url": f"https://youtube.com/@{username}", "check_url": f"https://youtube.com/@{username}"},
+        {"name": "Instagram", "url": f"https://instagram.com/{username}", "check_url": f"https://www.instagram.com/{username}/"},
+        {"name": "Facebook", "url": f"https://facebook.com/{username}", "check_url": f"https://www.facebook.com/{username}"}
     ]
 
     for platform in platforms:
         try:
-            res = requests.get(platform["check_url"], headers=headers, timeout=5, allow_redirects=False)
-            if res.status_code == 200:
-                results.append(f"✅ {platform['name']}: {platform['url']}")
+            res = requests.get(platform["check_url"], headers=headers, timeout=8, allow_redirects=False)
+            
+            if platform["name"] == "Instagram":
+                if res.status_code == 200:
+                    results.append(f"✅ {platform['name']}: {platform['url']}")
+            elif platform["name"] == "Facebook":
+                if res.status_code == 200:
+                    results.append(f"✅ {platform['name']}: {platform['url']}")
+            else:
+                if res.status_code == 200:
+                    results.append(f"✅ {platform['name']}: {platform['url']}")
+                    
         except Exception:
             pass
 
     if results:
         final_text = f"🕵️‍♂️ OSINT Results for **{username}**:\n\n" + "\n".join(results)
-        final_text += "\n\n⚠️ *Note: Platforms like Instagram and Facebook block basic bot requests due to high security.*"
+        final_text += "\n\n⚠️ *Note: Platforms like Instagram and Facebook might block requests due to high security.*"
     else:
         final_text = f"❌ No public profiles found for **{username}**."
     
